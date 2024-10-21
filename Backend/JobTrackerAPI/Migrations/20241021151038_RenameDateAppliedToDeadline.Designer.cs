@@ -3,6 +3,7 @@ using System;
 using JobTrackerAPI.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace JobTrackerAPI.Migrations
 {
     [DbContext(typeof(JobContext))]
-    partial class JobContextModelSnapshot : ModelSnapshot
+    [Migration("20241021151038_RenameDateAppliedToDeadline")]
+    partial class RenameDateAppliedToDeadline
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.10");

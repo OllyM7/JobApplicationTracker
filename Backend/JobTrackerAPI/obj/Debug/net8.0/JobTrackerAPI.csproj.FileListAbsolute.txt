@@ -132,3 +132,4 @@
 /Users/olly/Personal Project/job-application-tracker/Backend/JobTrackerAPI/obj/Debug/net8.0/JobTrackerAPI.pdb
 /Users/olly/Personal Project/job-application-tracker/Backend/JobTrackerAPI/obj/Debug/net8.0/JobTrackerAPI.genruntimeconfig.cache
 /Users/olly/Personal Project/job-application-tracker/Backend/JobTrackerAPI/obj/Debug/net8.0/ref/JobTrackerAPI.dll
+/Users/olly/Personal Project/job-application-tracker/Backend/JobTrackerAPI/obj/Debug/net8.0/JobTrackerAPI.sourcelink.json
