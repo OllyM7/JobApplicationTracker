@@ -3,6 +3,7 @@ using System;
 using JobTrackerAPI.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace JobTrackerAPI.Migrations
 {
     [DbContext(typeof(JobContext))]
-    partial class JobContextModelSnapshot : ModelSnapshot
+    [Migration("20241019193842_UpdateJobStatusEnum")]
+    partial class UpdateJobStatusEnum
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.10");
@@ -27,7 +30,7 @@ namespace JobTrackerAPI.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTime>("Deadline")
+                    b.Property<DateTime>("DateApplied")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Notes")
