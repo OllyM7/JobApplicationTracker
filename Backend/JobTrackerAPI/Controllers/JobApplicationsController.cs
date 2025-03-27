@@ -2,11 +2,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using JobTrackerAPI.Data;
 using JobTrackerAPI.Models;
+using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace JobTrackerAPI.Controllers
 {
-    [Route("api/[controller]")]
+    [Authorize]
     [ApiController]
+    [Route("api/[controller]")]
     public class JobApplicationsController : ControllerBase
     {
         private readonly JobContext _context;
@@ -16,14 +19,19 @@ namespace JobTrackerAPI.Controllers
             _context = context;
         }
 
-        // GET: api/jobapplications
+        // GET: api/jobapplications - Returns only the current user's applications
         [HttpGet]
         public async Task<ActionResult<IEnumerable<JobApplication>>> GetJobApplications()
         {
-            return await _context.JobApplications.ToListAsync();
+            string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+            var userJobs = await _context.JobApplications
+                .Where(job => job.UserId == userId)
+                .ToListAsync();
+
+            return Ok(userJobs);
         }
 
-        // GET: api/jobapplications/5
+        // GET: api/jobapplications/5 - Returns the application only if it belongs to the current user
         [HttpGet("{id}")]
         public async Task<ActionResult<JobApplication>> GetJobApplication(int id)
         {
@@ -34,20 +42,40 @@ namespace JobTrackerAPI.Controllers
                 return NotFound();
             }
 
-            return jobApplication;
+            string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+            if (jobApplication.UserId != userId)
+            {
+                return Unauthorized();
+            }
+
+            return Ok(jobApplication);
         }
 
-        // POST: api/jobapplications
+        // POST: api/jobapplications - Creates a new job application associated with the current user
         [HttpPost]
-        public async Task<ActionResult<JobApplication>> CreateJobApplication(JobApplication jobApplication)
+        public async Task<ActionResult<JobApplication>> CreateJobApplication([FromBody] JobApplicationCreateDto dto)
         {
+            // Get the current user's ID from the claims
+            string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+
+            // Map the DTO to the JobApplication entity
+            var jobApplication = new JobApplication
+            {
+                CompanyName = dto.CompanyName,
+                Position = dto.Position,
+                Status = (JobStatus)dto.Status,
+                Deadline = dto.Deadline,
+                Notes = dto.Notes,
+                UserId = userId // Automatically assign the authenticated user's ID
+            };
+
             _context.JobApplications.Add(jobApplication);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetJobApplication), new { id = jobApplication.Id }, jobApplication);
-        }
+    return CreatedAtAction(nameof(GetJobApplication), new { id = jobApplication.Id }, jobApplication);
+}
 
-        // PUT: api/jobapplications/5
+        // PUT: api/jobapplications/5 - Updates an application only if it belongs to the current user
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateJobApplication(int id, JobApplication jobApplication)
         {
@@ -55,6 +83,21 @@ namespace JobTrackerAPI.Controllers
             {
                 return BadRequest();
             }
+
+            string? userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            // Retrieve the existing application to check ownership
+            var existingJob = await _context.JobApplications.AsNoTracking().FirstOrDefaultAsync(j => j.Id == id);
+            if (existingJob == null)
+            {
+                return NotFound();
+            }
+            if (existingJob.UserId != userId)
+            {
+                return Unauthorized();
+            }
+
+            // Ensure the UserId remains the same as the current user's ID
+            jobApplication.UserId = userId;
 
             _context.Entry(jobApplication).State = EntityState.Modified;
 
@@ -77,7 +120,7 @@ namespace JobTrackerAPI.Controllers
             return NoContent();
         }
 
-        // DELETE: api/jobapplications/5
+        // DELETE: api/jobapplications/5 - Deletes an application only if it belongs to the current user
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteJobApplication(int id)
         {
@@ -86,6 +129,12 @@ namespace JobTrackerAPI.Controllers
             if (jobApplication == null)
             {
                 return NotFound();
+            }
+
+            string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+            if (jobApplication.UserId != userId)
+            {
+                return Unauthorized();
             }
 
             _context.JobApplications.Remove(jobApplication);
@@ -100,4 +149,3 @@ namespace JobTrackerAPI.Controllers
         }
     }
 }
-
