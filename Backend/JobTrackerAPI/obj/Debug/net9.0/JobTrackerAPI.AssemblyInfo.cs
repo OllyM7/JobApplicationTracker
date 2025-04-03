@@ -10,10 +10,11 @@
 using System;
 using System.Reflection;
 
+[assembly: Microsoft.Extensions.Configuration.UserSecrets.UserSecretsIdAttribute("82358b8e-f35f-4b50-8c9e-3557d33ff161")]
 [assembly: System.Reflection.AssemblyCompanyAttribute("JobTrackerAPI")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5e2d6b3093724a80a83a398a170d86b6a0a3130b")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5c07ae8952da32695039807e119bcf85032fe79d")]
 [assembly: System.Reflection.AssemblyProductAttribute("JobTrackerAPI")]
 [assembly: System.Reflection.AssemblyTitleAttribute("JobTrackerAPI")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

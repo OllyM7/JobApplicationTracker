@@ -19,19 +19,32 @@ namespace JobTrackerAPI.Controllers
             _context = context;
         }
 
-        // GET: api/jobapplications - Returns only the current user's applications
+        // GET: api/jobapplications - Returns user applications or all applications for admins
         [HttpGet]
         public async Task<ActionResult<IEnumerable<JobApplication>>> GetJobApplications()
         {
+            // Check if the user is an admin
+            bool isAdmin = User.IsInRole("Admin");
             string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
-            var userJobs = await _context.JobApplications
-                .Where(job => job.UserId == userId)
-                .ToListAsync();
 
-            return Ok(userJobs);
+            // If admin, can see all applications, otherwise only their own
+            if (isAdmin)
+            {
+                var allJobs = await _context.JobApplications
+                    .Include(j => j.User) // Include user information
+                    .ToListAsync();
+                return Ok(allJobs);
+            }
+            else
+            {
+                var userJobs = await _context.JobApplications
+                    .Where(job => job.UserId == userId)
+                    .ToListAsync();
+                return Ok(userJobs);
+            }
         }
 
-        // GET: api/jobapplications/5 - Returns the application only if it belongs to the current user
+        // GET: api/jobapplications/5 - Returns the application if it belongs to the user or if admin
         [HttpGet("{id}")]
         public async Task<ActionResult<JobApplication>> GetJobApplication(int id)
         {
@@ -42,8 +55,11 @@ namespace JobTrackerAPI.Controllers
                 return NotFound();
             }
 
+            // Check if the user is an admin or the owner of the application
+            bool isAdmin = User.IsInRole("Admin");
             string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
-            if (jobApplication.UserId != userId)
+
+            if (!isAdmin && jobApplication.UserId != userId)
             {
                 return Unauthorized();
             }
@@ -72,10 +88,10 @@ namespace JobTrackerAPI.Controllers
             _context.JobApplications.Add(jobApplication);
             await _context.SaveChangesAsync();
 
-    return CreatedAtAction(nameof(GetJobApplication), new { id = jobApplication.Id }, jobApplication);
-}
+            return CreatedAtAction(nameof(GetJobApplication), new { id = jobApplication.Id }, jobApplication);
+        }
 
-        // PUT: api/jobapplications/5 - Updates an application only if it belongs to the current user
+        // PUT: api/jobapplications/5 - Updates an application if the user owns it or is an admin
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateJobApplication(int id, JobApplication jobApplication)
         {
@@ -84,20 +100,28 @@ namespace JobTrackerAPI.Controllers
                 return BadRequest();
             }
 
-            string? userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            bool isAdmin = User.IsInRole("Admin");
+            string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+            
             // Retrieve the existing application to check ownership
             var existingJob = await _context.JobApplications.AsNoTracking().FirstOrDefaultAsync(j => j.Id == id);
+            
             if (existingJob == null)
             {
                 return NotFound();
             }
-            if (existingJob.UserId != userId)
+            
+            // If not an admin and not the owner, return unauthorized
+            if (!isAdmin && existingJob.UserId != userId)
             {
                 return Unauthorized();
             }
 
-            // Ensure the UserId remains the same as the current user's ID
-            jobApplication.UserId = userId;
+            // If not an admin, ensure the UserId remains unchanged
+            if (!isAdmin)
+            {
+                jobApplication.UserId = userId;
+            }
 
             _context.Entry(jobApplication).State = EntityState.Modified;
 
@@ -120,7 +144,7 @@ namespace JobTrackerAPI.Controllers
             return NoContent();
         }
 
-        // DELETE: api/jobapplications/5 - Deletes an application only if it belongs to the current user
+        // DELETE: api/jobapplications/5 - Deletes an application if the user owns it or is an admin
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteJobApplication(int id)
         {
@@ -131,8 +155,11 @@ namespace JobTrackerAPI.Controllers
                 return NotFound();
             }
 
+            bool isAdmin = User.IsInRole("Admin");
             string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
-            if (jobApplication.UserId != userId)
+            
+            // If not an admin and not the owner, return unauthorized
+            if (!isAdmin && jobApplication.UserId != userId)
             {
                 return Unauthorized();
             }
@@ -141,6 +168,33 @@ namespace JobTrackerAPI.Controllers
             await _context.SaveChangesAsync();
 
             return NoContent();
+        }
+
+        // Admin only: Get all job applications with statistics
+        [HttpGet("stats")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> GetJobStatistics()
+        {
+            var allJobs = await _context.JobApplications.ToListAsync();
+            
+            var stats = new
+            {
+                TotalApplications = allJobs.Count,
+                ByStatus = new
+                {
+                    ApplicationNeeded = allJobs.Count(j => j.Status == JobStatus.ApplicationNeeded),
+                    Applied = allJobs.Count(j => j.Status == JobStatus.Applied),
+                    ExamCenter = allJobs.Count(j => j.Status == JobStatus.ExamCenter),
+                    Interviewing = allJobs.Count(j => j.Status == JobStatus.Interviewing),
+                    AwaitingOffer = allJobs.Count(j => j.Status == JobStatus.AwaitingOffer)
+                },
+                UpcomingDeadlines = allJobs
+                    .Where(j => j.Deadline >= DateTime.Today && j.Deadline <= DateTime.Today.AddDays(7))
+                    .OrderBy(j => j.Deadline)
+                    .ToList()
+            };
+            
+            return Ok(stats);
         }
 
         private bool JobApplicationExists(int id)

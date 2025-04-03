@@ -4,10 +4,10 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Google;
+using JobTrackerAPI.Services;
 
 namespace JobTrackerAPI.Controllers
 {
@@ -16,12 +16,20 @@ namespace JobTrackerAPI.Controllers
     public class AuthController : ControllerBase
     {
         private readonly UserManager<IdentityUser> _userManager;
-        private readonly IConfiguration _configuration; // Inject configuration for JWT
+        private readonly IConfiguration _configuration;
+        private readonly RolesService _rolesService;
+        private readonly ILogger<AuthController> _logger;
 
-        public AuthController(UserManager<IdentityUser> userManager, IConfiguration configuration)
+        public AuthController(
+            UserManager<IdentityUser> userManager, 
+            IConfiguration configuration,
+            RolesService rolesService,
+            ILogger<AuthController> logger)
         {
             _userManager = userManager;
-            _configuration = configuration; // Store configuration
+            _configuration = configuration;
+            _rolesService = rolesService;
+            _logger = logger;
         }
 
         [HttpPost("register")]
@@ -34,7 +42,23 @@ namespace JobTrackerAPI.Controllers
             var result = await _userManager.CreateAsync(user, model.Password);
 
             if (result.Succeeded)
-                return Ok(new { Message = "User registered successfully" });
+            {
+                // Always assign the "User" role by default
+                var roleResult = await _rolesService.AssignRoleToUserAsync(user, "User");
+                if (!roleResult.Succeeded)
+                {
+                    _logger.LogWarning($"Failed to assign 'User' role to {user.Email} during registration: {string.Join(", ", roleResult.Errors.Select(e => e.Description))}");
+                }
+                
+                // Generate a token that includes role information
+                var token = await GenerateJwtTokenAsync(user);
+                
+                return Ok(new { 
+                    Message = "User registered successfully",
+                    Token = token,
+                    Roles = await _rolesService.GetUserRolesAsync(user)
+                });
+            }
 
             return BadRequest(result.Errors);
         }
@@ -46,37 +70,30 @@ namespace JobTrackerAPI.Controllers
             if (user == null || !await _userManager.CheckPasswordAsync(user, model.Password))
                 return Unauthorized(new { Message = "Invalid credentials" });
 
-            // Generate JWT Token
-            var claims = new[]
+            // Ensure the user has at least the "User" role
+            var roles = await _userManager.GetRolesAsync(user);
+            if (roles.Count == 0)
             {
-                new Claim(ClaimTypes.NameIdentifier, user.Id), // Include the user's ID
-                new Claim(JwtRegisteredClaimNames.Sub, user.Email),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-            };
-
-            var jwtKey = _configuration["Jwt:Key"];
-            if (string.IsNullOrEmpty(jwtKey))
-            {
-                return StatusCode(500, "JWT Key is not configured properly.");
+                _logger.LogInformation($"User {user.Email} has no roles, assigning 'User' role during login");
+                var roleResult = await _rolesService.AssignRoleToUserAsync(user, "User");
+                if (!roleResult.Succeeded)
+                {
+                    _logger.LogWarning($"Failed to assign 'User' role to {user.Email} during login: {string.Join(", ", roleResult.Errors.Select(e => e.Description))}");
+                }
             }
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-            var token = new JwtSecurityToken(
-                issuer: _configuration["Jwt:Issuer"],
-                audience: _configuration["Jwt:Audience"],
-                claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(30),
-                signingCredentials: creds
-            );
-
-            return Ok(new { Token = new JwtSecurityTokenHandler().WriteToken(token) });
+            // Generate a token that includes role information
+            var token = await GenerateJwtTokenAsync(user);
+            
+            return Ok(new { 
+                Token = token,
+                Roles = await _rolesService.GetUserRolesAsync(user)
+            });
         }
 
         [HttpGet("google-login")]
         public IActionResult GoogleLogin()
         {
-            // Specify the redirect URI after successful external login
             var properties = new AuthenticationProperties { RedirectUri = Url.Action("GoogleResponse") };
             return Challenge(properties, GoogleDefaults.AuthenticationScheme);
         }
@@ -84,14 +101,12 @@ namespace JobTrackerAPI.Controllers
         [HttpGet("google-response")]
         public async Task<IActionResult> GoogleResponse()
         {
-            // Get the login info from the external provider
             var result = await HttpContext.AuthenticateAsync(IdentityConstants.ExternalScheme);
             if (!result.Succeeded)
             {
                 return BadRequest("External authentication error");
             }
 
-            // Extract the email claim
             var externalClaims = result.Principal.Claims;
             var emailClaim = externalClaims.FirstOrDefault(c => c.Type == ClaimTypes.Email);
             if (emailClaim == null)
@@ -99,10 +114,12 @@ namespace JobTrackerAPI.Controllers
                 return BadRequest("Email not received from external provider");
             }
 
-            // Find or create a user
             var user = await _userManager.FindByEmailAsync(emailClaim.Value);
+            bool isNewUser = false;
+            
             if (user == null)
             {
+                isNewUser = true;
                 user = new IdentityUser { UserName = emailClaim.Value, Email = emailClaim.Value };
                 var createResult = await _userManager.CreateAsync(user);
                 if (!createResult.Succeeded)
@@ -110,19 +127,60 @@ namespace JobTrackerAPI.Controllers
                     return BadRequest(createResult.Errors);
                 }
             }
-
-            // Create claims for the JWT token
-            var claims = new[]
+            
+            // Check if the user has any roles
+            var roles = await _userManager.GetRolesAsync(user);
+            if (roles.Count == 0)
             {
+                // Assign the "User" role if the user has no roles
+                _logger.LogInformation($"{(isNewUser ? "New" : "Existing")} Google user {user.Email} has no roles, assigning 'User' role");
+                var roleResult = await _rolesService.AssignRoleToUserAsync(user, "User");
+                if (!roleResult.Succeeded)
+                {
+                    _logger.LogWarning($"Failed to assign 'User' role to Google user {user.Email}: {string.Join(", ", roleResult.Errors.Select(e => e.Description))}");
+                }
+            }
+
+            // Generate a token that includes role information
+            var token = await GenerateJwtTokenAsync(user);
+
+            // Sign out of the external cookie
+            await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
+
+            return Ok(new { 
+                Token = token,
+                Roles = await _rolesService.GetUserRolesAsync(user)
+            });
+        }
+        
+        private async Task<string> GenerateJwtTokenAsync(IdentityUser user)
+        {
+            // Get the user's roles
+            var roles = await _userManager.GetRolesAsync(user);
+            
+            // Create a list of claims
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.NameIdentifier, user.Id),
                 new Claim(JwtRegisteredClaimNames.Sub, user.Email),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
+            
+            // Add role claims
+            foreach (var role in roles)
+            {
+                if (!string.IsNullOrEmpty(role))
+                {
+                    claims.Add(new Claim(ClaimTypes.Role, role));
+                }
+            }
 
             var jwtKey = _configuration["Jwt:Key"];
             if (string.IsNullOrEmpty(jwtKey))
             {
-                return StatusCode(500, "JWT Key is not configured properly.");
+                throw new InvalidOperationException("JWT Key is not configured properly.");
             }
+            
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
@@ -130,15 +188,11 @@ namespace JobTrackerAPI.Controllers
                 issuer: _configuration["Jwt:Issuer"],
                 audience: _configuration["Jwt:Audience"],
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(30),
+                expires: DateTime.UtcNow.AddHours(1), // Increased token expiration to 1 hour
                 signingCredentials: creds
             );
 
-            // Sign out of the external cookie
-            await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
-
-            // Optionally, redirect or return the token
-            return Ok(new { Token = new JwtSecurityTokenHandler().WriteToken(token) });
+            return new JwtSecurityTokenHandler().WriteToken(token);
         }
     }
 }
