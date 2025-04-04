@@ -82,7 +82,67 @@ namespace JobTrackerAPI.Controllers
                 Status = (JobStatus)dto.Status,
                 Deadline = dto.Deadline,
                 Notes = dto.Notes,
-                UserId = userId // Automatically assign the authenticated user's ID
+                UserId = userId,
+                ApplicationDate = DateTime.UtcNow
+            };
+
+            _context.JobApplications.Add(jobApplication);
+            await _context.SaveChangesAsync();
+
+            return CreatedAtAction(nameof(GetJobApplication), new { id = jobApplication.Id }, jobApplication);
+        }
+
+        // POST: api/jobapplications/apply/{jobPostingId} - Apply to a job posting
+        [HttpPost("apply/{jobPostingId}")]
+        public async Task<ActionResult<JobApplication>> ApplyToJobPosting(int jobPostingId, [FromBody] JobApplicationApplyDto dto)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            // Get the job posting
+            var jobPosting = await _context.JobPostings.FindAsync(jobPostingId);
+            if (jobPosting == null)
+            {
+                return NotFound(new { Message = $"Job posting with ID {jobPostingId} not found" });
+            }
+
+            // Check if job posting is active
+            if (!jobPosting.IsActive)
+            {
+                return BadRequest(new { Message = "This job posting is no longer accepting applications" });
+            }
+
+            // Check if deadline has passed
+            if (jobPosting.ApplicationDeadline < DateTime.UtcNow)
+            {
+                return BadRequest(new { Message = "The application deadline for this job posting has passed" });
+            }
+
+            // Get the current user's ID from the claims
+            string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+
+            // Check if user has already applied to this job posting
+            var existingApplication = await _context.JobApplications
+                .FirstOrDefaultAsync(j => j.UserId == userId && j.JobPostingId == jobPostingId);
+
+            if (existingApplication != null)
+            {
+                return BadRequest(new { Message = "You have already applied to this job posting" });
+            }
+
+            // Create the job application
+            var jobApplication = new JobApplication
+            {
+                CompanyName = jobPosting.CompanyName,
+                Position = jobPosting.Title,
+                Status = JobStatus.Applied, // Automatically set to Applied since it's a direct application
+                Deadline = jobPosting.ApplicationDeadline,
+                Notes = dto.Notes,
+                UserId = userId,
+                JobPostingId = jobPostingId,
+                ApplicationDate = DateTime.UtcNow,
+                CoverLetter = dto.CoverLetter,
+                ResumeUrl = dto.ResumeUrl
             };
 
             _context.JobApplications.Add(jobApplication);
@@ -201,5 +261,12 @@ namespace JobTrackerAPI.Controllers
         {
             return _context.JobApplications.Any(e => e.Id == id);
         }
+    }
+
+    public class JobApplicationApplyDto
+    {
+        public required string Notes { get; set; }
+        public string? CoverLetter { get; set; }
+        public string? ResumeUrl { get; set; }
     }
 }

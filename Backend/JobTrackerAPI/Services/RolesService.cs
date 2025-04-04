@@ -21,7 +21,7 @@ namespace JobTrackerAPI.Services
 
         public async Task EnsureRolesCreatedAsync()
         {
-            string[] roles = { "Admin", "User" };
+            string[] roles = { "Admin", "User", "Recruiter" };
 
             foreach (var roleName in roles)
             {

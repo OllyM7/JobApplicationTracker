@@ -36,6 +36,9 @@ builder.Services.AddScoped<RoleMigrationUtility>();
 // Register the AdminDashboardService
 builder.Services.AddScoped<AdminDashboardService>();
 
+// Register the JobPostingService and RecruiterService
+builder.Services.AddScoped<RecruiterService>();
+builder.Services.AddScoped<JobPostingService>();
 
 // Add Authentication with JWT Bearer and Google OAuth
 builder.Services.AddAuthentication(options =>

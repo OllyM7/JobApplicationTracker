@@ -3,6 +3,7 @@ using System;
 using JobTrackerAPI.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace JobTrackerAPI.Migrations
 {
     [DbContext(typeof(JobContext))]
-    partial class JobContextModelSnapshot : ModelSnapshot
+    [Migration("20250404201927_AddJobPostingAndRecruiterModels")]
+    partial class AddJobPostingAndRecruiterModels
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -23,14 +26,8 @@ namespace JobTrackerAPI.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<DateTime>("ApplicationDate")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("CompanyName")
                         .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CoverLetter")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("Deadline")
@@ -45,9 +42,6 @@ namespace JobTrackerAPI.Migrations
 
                     b.Property<string>("Position")
                         .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ResumeUrl")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Status")
@@ -361,7 +355,7 @@ namespace JobTrackerAPI.Migrations
 
             modelBuilder.Entity("JobTrackerAPI.Models.JobApplication", b =>
                 {
-                    b.HasOne("JobTrackerAPI.Models.JobPosting", "JobPosting")
+                    b.HasOne("JobTrackerAPI.Models.JobPosting", null)
                         .WithMany("Applications")
                         .HasForeignKey("JobPostingId")
                         .OnDelete(DeleteBehavior.Cascade);
@@ -371,8 +365,6 @@ namespace JobTrackerAPI.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("JobPosting");
 
                     b.Navigation("User");
                 });
