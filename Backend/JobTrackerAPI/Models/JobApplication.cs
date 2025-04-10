@@ -1,7 +1,7 @@
 using System;
 using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.AspNetCore.Identity;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace JobTrackerAPI.Models
 {
@@ -25,9 +25,32 @@ namespace JobTrackerAPI.Models
         [ForeignKey("JobPostingId")]
         public JobPosting? JobPosting { get; set; }
         
-        // New fields for application tracking
+        // Application tracking and document fields
         public DateTime ApplicationDate { get; set; } = DateTime.UtcNow;
+        
+        // Cover letter content (stored as text in the database)
         public string? CoverLetter { get; set; }
-        public string? ResumeUrl { get; set; }
+        
+        // Resume/CV (stored as a file path or URL)
+        public string? CvFilePath { get; set; }
+        
+        // Status of the application from the recruiter's perspective
+        public ApplicationStatus RecruiterStatus { get; set; } = ApplicationStatus.Pending;
+        
+        // Feedback from the recruiter (visible to the applicant)
+        public string? RecruiterFeedback { get; set; }
+        
+        // Date when the recruiter last updated the status
+        public DateTime? RecruiterResponseDate { get; set; }
+    }
+    
+    // Enum to track the application status from the recruiter's side
+    public enum ApplicationStatus
+    {
+        Pending = 0,
+        Reviewing = 1,
+        InterviewRequested = 2,
+        Rejected = 3,
+        Accepted = 4
     }
 }

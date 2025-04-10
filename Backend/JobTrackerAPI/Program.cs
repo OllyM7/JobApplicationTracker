@@ -8,6 +8,7 @@ using JobTrackerAPI.Data;
 using JobTrackerAPI.Services;
 using JobTrackerAPI.Middleware;
 using Microsoft.OpenApi.Models;
+using Microsoft.Extensions.FileProviders;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -39,6 +40,19 @@ builder.Services.AddScoped<AdminDashboardService>();
 // Register the JobPostingService and RecruiterService
 builder.Services.AddScoped<RecruiterService>();
 builder.Services.AddScoped<JobPostingService>();
+
+
+builder.Services.AddScoped<FileService>();
+
+//HERE
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Handle circular references
+        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.Preserve;
+        // Avoid infinite recursion by setting a reasonable max depth
+        options.JsonSerializerOptions.MaxDepth = 10;
+    });
 
 // Add Authentication with JWT Bearer and Google OAuth
 builder.Services.AddAuthentication(options =>
@@ -184,6 +198,37 @@ app.UseAuthentication(); // Enable authentication middleware
 
 // Add the role enforcement middleware after authentication but before authorization
 app.UseRoleEnforcement();
+
+// Add this before configuring the static files
+var uploadsPath = Path.Combine(builder.Environment.ContentRootPath, "Uploads");
+if (!Directory.Exists(uploadsPath))
+{
+    Directory.CreateDirectory(uploadsPath);
+}
+
+// Create the CV uploads directory as well
+var cvUploadsPath = Path.Combine(uploadsPath, "CVs");
+if (!Directory.Exists(cvUploadsPath))
+{
+    Directory.CreateDirectory(cvUploadsPath);
+}
+
+// Then add the static files middleware
+app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(uploadsPath),
+    RequestPath = "/uploads"
+});
+
+app.UseStaticFiles();
+
+// Add this to configure the file uploads directory for static file serving
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(Path.Combine(builder.Environment.ContentRootPath, "Uploads")),
+    RequestPath = "/uploads"
+});
 
 app.UseAuthorization();
 

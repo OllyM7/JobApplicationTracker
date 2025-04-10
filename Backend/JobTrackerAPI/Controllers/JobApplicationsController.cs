@@ -2,8 +2,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using JobTrackerAPI.Data;
 using JobTrackerAPI.Models;
+using JobTrackerAPI.Services;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 
 namespace JobTrackerAPI.Controllers
 {
@@ -13,53 +15,55 @@ namespace JobTrackerAPI.Controllers
     public class JobApplicationsController : ControllerBase
     {
         private readonly JobContext _context;
+        private readonly FileService _fileService;
+        private readonly ILogger<JobApplicationsController> _logger;
 
-        public JobApplicationsController(JobContext context)
+        public JobApplicationsController(
+            JobContext context,
+            FileService fileService,
+            ILogger<JobApplicationsController> logger)
         {
             _context = context;
+            _fileService = fileService;
+            _logger = logger;
         }
 
-        // GET: api/jobapplications - Returns user applications or all applications for admins
+        // GET: api/jobapplications - Returns only the current user's applications
         [HttpGet]
         public async Task<ActionResult<IEnumerable<JobApplication>>> GetJobApplications()
         {
-            // Check if the user is an admin
-            bool isAdmin = User.IsInRole("Admin");
             string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+            var userJobs = await _context.JobApplications
+                .Where(job => job.UserId == userId)
+                .Include(job => job.JobPosting)
+                .ToListAsync();
 
-            // If admin, can see all applications, otherwise only their own
-            if (isAdmin)
-            {
-                var allJobs = await _context.JobApplications
-                    .Include(j => j.User) // Include user information
-                    .ToListAsync();
-                return Ok(allJobs);
-            }
-            else
-            {
-                var userJobs = await _context.JobApplications
-                    .Where(job => job.UserId == userId)
-                    .ToListAsync();
-                return Ok(userJobs);
-            }
+            return Ok(userJobs);
         }
 
-        // GET: api/jobapplications/5 - Returns the application if it belongs to the user or if admin
+        // GET: api/jobapplications/5 - Returns the application only if it belongs to the current user
         [HttpGet("{id}")]
         public async Task<ActionResult<JobApplication>> GetJobApplication(int id)
         {
-            var jobApplication = await _context.JobApplications.FindAsync(id);
+            var jobApplication = await _context.JobApplications
+                .Include(job => job.JobPosting)
+                .FirstOrDefaultAsync(job => job.Id == id);
 
             if (jobApplication == null)
             {
                 return NotFound();
             }
 
-            // Check if the user is an admin or the owner of the application
-            bool isAdmin = User.IsInRole("Admin");
             string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
-
-            if (!isAdmin && jobApplication.UserId != userId)
+            
+            // Allow access if: the user owns the application, or is an admin, or is a recruiter who owns the job posting
+            bool isOwner = jobApplication.UserId == userId;
+            bool isAdmin = User.IsInRole("Admin");
+            bool isRecruiterWithAccess = User.IsInRole("Recruiter") && 
+                                         jobApplication.JobPosting != null && 
+                                         jobApplication.JobPosting.RecruiterId == userId;
+                                         
+            if (!isOwner && !isAdmin && !isRecruiterWithAccess)
             {
                 return Unauthorized();
             }
@@ -67,10 +71,13 @@ namespace JobTrackerAPI.Controllers
             return Ok(jobApplication);
         }
 
-        // POST: api/jobapplications - Creates a new job application associated with the current user
+        // POST: api/jobapplications - Creates a new manual job application (using existing DTO)
         [HttpPost]
         public async Task<ActionResult<JobApplication>> CreateJobApplication([FromBody] JobApplicationCreateDto dto)
         {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
             // Get the current user's ID from the claims
             string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
 
@@ -92,15 +99,23 @@ namespace JobTrackerAPI.Controllers
             return CreatedAtAction(nameof(GetJobApplication), new { id = jobApplication.Id }, jobApplication);
         }
 
-        // POST: api/jobapplications/apply/{jobPostingId} - Apply to a job posting
+        // POST: api/jobapplications/apply/{jobPostingId} - Apply to a job posting with CV upload
         [HttpPost("apply/{jobPostingId}")]
-        public async Task<ActionResult<JobApplication>> ApplyToJobPosting(int jobPostingId, [FromBody] JobApplicationApplyDto dto)
+        [RequestFormLimits(MultipartBodyLengthLimit = 10 * 1024 * 1024)] // 10MB limit
+        [RequestSizeLimit(10 * 1024 * 1024)] // 10MB limit
+        public async Task<ActionResult<JobApplication>> ApplyToJobPosting(
+            int jobPostingId, 
+            [FromForm] JobApplicationApplyDto dto,
+            IFormFile cvFile)
         {
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
             // Get the job posting
-            var jobPosting = await _context.JobPostings.FindAsync(jobPostingId);
+            var jobPosting = await _context.JobPostings
+                .Include(jp => jp.Recruiter)
+                .FirstOrDefaultAsync(jp => jp.Id == jobPostingId);
+                
             if (jobPosting == null)
             {
                 return NotFound(new { Message = $"Job posting with ID {jobPostingId} not found" });
@@ -130,6 +145,30 @@ namespace JobTrackerAPI.Controllers
                 return BadRequest(new { Message = "You have already applied to this job posting" });
             }
 
+            // Process the CV file
+            string? cvFilePath = null;
+            if (cvFile != null && cvFile.Length > 0)
+            {
+                try
+                {
+                    cvFilePath = await _fileService.SaveCvFileAsync(cvFile, userId);
+                }
+                catch (ArgumentException ex)
+                {
+                    return BadRequest(new { Message = ex.Message });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error saving CV file");
+                    return StatusCode(500, new { Message = "An error occurred while saving the CV file" });
+                }
+            }
+            else
+            {
+                // CV is required for job posting applications
+                return BadRequest(new { Message = "A CV file is required when applying to a job posting" });
+            }
+
             // Create the job application
             var jobApplication = new JobApplication
             {
@@ -142,7 +181,8 @@ namespace JobTrackerAPI.Controllers
                 JobPostingId = jobPostingId,
                 ApplicationDate = DateTime.UtcNow,
                 CoverLetter = dto.CoverLetter,
-                ResumeUrl = dto.ResumeUrl
+                CvFilePath = cvFilePath,
+                RecruiterStatus = ApplicationStatus.Pending
             };
 
             _context.JobApplications.Add(jobApplication);
@@ -151,7 +191,7 @@ namespace JobTrackerAPI.Controllers
             return CreatedAtAction(nameof(GetJobApplication), new { id = jobApplication.Id }, jobApplication);
         }
 
-        // PUT: api/jobapplications/5 - Updates an application if the user owns it or is an admin
+        // PUT: api/jobapplications/5 - Updates an application only if it belongs to the current user
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateJobApplication(int id, JobApplication jobApplication)
         {
@@ -160,28 +200,32 @@ namespace JobTrackerAPI.Controllers
                 return BadRequest();
             }
 
-            bool isAdmin = User.IsInRole("Admin");
-            string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
-            
+            string? userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             // Retrieve the existing application to check ownership
             var existingJob = await _context.JobApplications.AsNoTracking().FirstOrDefaultAsync(j => j.Id == id);
-            
             if (existingJob == null)
             {
                 return NotFound();
             }
-            
-            // If not an admin and not the owner, return unauthorized
-            if (!isAdmin && existingJob.UserId != userId)
+            if (existingJob.UserId != userId && !User.IsInRole("Admin"))
             {
                 return Unauthorized();
             }
 
-            // If not an admin, ensure the UserId remains unchanged
-            if (!isAdmin)
+            // If this is a job posting application, don't allow changing certain fields
+            if (existingJob.JobPostingId.HasValue)
             {
-                jobApplication.UserId = userId;
+                // Preserve the original values for these fields
+                jobApplication.JobPostingId = existingJob.JobPostingId;
+                jobApplication.RecruiterStatus = existingJob.RecruiterStatus;
+                jobApplication.RecruiterFeedback = existingJob.RecruiterFeedback;
+                jobApplication.RecruiterResponseDate = existingJob.RecruiterResponseDate;
+                jobApplication.ApplicationDate = existingJob.ApplicationDate;
+                jobApplication.CvFilePath = existingJob.CvFilePath;
             }
+
+            // Ensure the UserId remains the same
+            jobApplication.UserId = existingJob.UserId;
 
             _context.Entry(jobApplication).State = EntityState.Modified;
 
@@ -204,7 +248,44 @@ namespace JobTrackerAPI.Controllers
             return NoContent();
         }
 
-        // DELETE: api/jobapplications/5 - Deletes an application if the user owns it or is an admin
+        // PUT: api/jobapplications/5/recruiter-status - Updates the recruiter status of an application
+        [Authorize(Roles = "Recruiter,Admin")]
+        [HttpPut("{id}/recruiter-status")]
+        public async Task<IActionResult> UpdateRecruiterStatus(int id, [FromBody] JobApplicationStatusUpdateDto dto)
+        {
+            var jobApplication = await _context.JobApplications
+                .Include(j => j.JobPosting)
+                .FirstOrDefaultAsync(j => j.Id == id);
+
+            if (jobApplication == null)
+            {
+                return NotFound();
+            }
+
+            // Check if this is a job posting application
+            if (!jobApplication.JobPostingId.HasValue)
+            {
+                return BadRequest(new { Message = "This is not a job posting application" });
+            }
+
+            // Check if the current user is the recruiter who posted the job
+            string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+            if (!User.IsInRole("Admin") && jobApplication.JobPosting?.RecruiterId != userId)
+            {
+                return Unauthorized();
+            }
+
+            // Update the recruiter status
+            jobApplication.RecruiterStatus = dto.Status;
+            jobApplication.RecruiterFeedback = dto.Feedback;
+            jobApplication.RecruiterResponseDate = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+
+        // DELETE: api/jobapplications/5 - Deletes an application only if it belongs to the current user
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteJobApplication(int id)
         {
@@ -215,13 +296,16 @@ namespace JobTrackerAPI.Controllers
                 return NotFound();
             }
 
-            bool isAdmin = User.IsInRole("Admin");
             string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
-            
-            // If not an admin and not the owner, return unauthorized
-            if (!isAdmin && jobApplication.UserId != userId)
+            if (jobApplication.UserId != userId && !User.IsInRole("Admin"))
             {
                 return Unauthorized();
+            }
+
+            // If there's a CV file, attempt to delete it
+            if (!string.IsNullOrEmpty(jobApplication.CvFilePath))
+            {
+                _fileService.DeleteFile(jobApplication.CvFilePath);
             }
 
             _context.JobApplications.Remove(jobApplication);
@@ -230,43 +314,9 @@ namespace JobTrackerAPI.Controllers
             return NoContent();
         }
 
-        // Admin only: Get all job applications with statistics
-        [HttpGet("stats")]
-        [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> GetJobStatistics()
-        {
-            var allJobs = await _context.JobApplications.ToListAsync();
-            
-            var stats = new
-            {
-                TotalApplications = allJobs.Count,
-                ByStatus = new
-                {
-                    ApplicationNeeded = allJobs.Count(j => j.Status == JobStatus.ApplicationNeeded),
-                    Applied = allJobs.Count(j => j.Status == JobStatus.Applied),
-                    ExamCenter = allJobs.Count(j => j.Status == JobStatus.ExamCenter),
-                    Interviewing = allJobs.Count(j => j.Status == JobStatus.Interviewing),
-                    AwaitingOffer = allJobs.Count(j => j.Status == JobStatus.AwaitingOffer)
-                },
-                UpcomingDeadlines = allJobs
-                    .Where(j => j.Deadline >= DateTime.Today && j.Deadline <= DateTime.Today.AddDays(7))
-                    .OrderBy(j => j.Deadline)
-                    .ToList()
-            };
-            
-            return Ok(stats);
-        }
-
         private bool JobApplicationExists(int id)
         {
             return _context.JobApplications.Any(e => e.Id == id);
         }
-    }
-
-    public class JobApplicationApplyDto
-    {
-        public required string Notes { get; set; }
-        public string? CoverLetter { get; set; }
-        public string? ResumeUrl { get; set; }
     }
 }
