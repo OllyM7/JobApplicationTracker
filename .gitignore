@@ -1,2 +1,43 @@
+# Environment variables
+.env
+.env.*.local
 **/appsettings.Development.json
-**/bin/Debug/
+
+# Dependencies
+node_modules/
+/Frontend/job-tracker-client/node_modules/ # Be more specific if needed
+
+# Build output
+/Frontend/job-tracker-client/build/
+/Frontend/job-tracker-client/dist/
+[Bb]in/
+[Oo]bj/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Coverage directory
+coverage/
+/Frontend/job-tracker-client/coverage/
+
+# IDE / Editor specific
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Nuget packages
+*.nupkg
+
+# Test results
+TestResults/

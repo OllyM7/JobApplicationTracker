@@ -277,6 +277,21 @@ namespace JobTrackerAPI.Controllers
             return BadRequest(new { Message = "Failed to verify email", Errors = result.Errors });
         }
 
+        // New GET endpoint to handle email verification links
+        [HttpGet("verify-email")]
+        [Route("verify-email")]
+        public IActionResult VerifyEmailRedirect([FromQuery] string token, [FromQuery] string email)
+        {
+            if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(email))
+            {
+                return BadRequest("Invalid verification link");
+            }
+            
+            // Redirect to the frontend with the token and email
+            var frontendUrl = _configuration["EmailSettings:EmailVerificationCallbackUrl"];
+            return Redirect($"{frontendUrl}?token={Uri.EscapeDataString(token)}&email={Uri.EscapeDataString(email)}");
+        }
+
         [HttpPost("resend-verification-email")]
         public async Task<IActionResult> ResendVerificationEmail([FromBody] ResendVerificationEmailDto model)
         {

@@ -92,18 +92,21 @@ namespace JobTrackerAPI.Services
         {
             string subject = "Verify Your Email Address";
             
+            // Use the dedicated VerifyEmail controller endpoint
+            string apiVerifyEndpoint = "https://localhost:7116/VerifyEmail";
+            
             string htmlContent = $@"
             <html>
             <body>
                 <h2>Verify Your Email Address</h2>
                 <p>Thank you for registering! Please verify your email address.</p>
                 <p>Please click the link below to verify your email:</p>
-                <p><a href='{callbackUrl}?token={Uri.EscapeDataString(verificationToken)}&email={Uri.EscapeDataString(email)}'>Verify Email</a></p>
+                <p><a href='{apiVerifyEndpoint}?token={Uri.EscapeDataString(verificationToken)}&email={Uri.EscapeDataString(email)}'>Verify Email</a></p>
                 <p>If you didn't register for an account, please ignore this email.</p>
             </body>
             </html>";
             
-            string plainTextContent = $"Verify your email by clicking this link: {callbackUrl}?token={Uri.EscapeDataString(verificationToken)}&email={Uri.EscapeDataString(email)}";
+            string plainTextContent = $"Verify your email by clicking this link: {apiVerifyEndpoint}?token={Uri.EscapeDataString(verificationToken)}&email={Uri.EscapeDataString(email)}";
             
             await SendEmailAsync(email, subject, htmlContent, plainTextContent);
         }
