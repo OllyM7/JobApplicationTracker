@@ -26,9 +26,35 @@ builder.Services.AddDbContext<JobContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Add ASP.NET Identity with Roles
-builder.Services.AddIdentity<IdentityUser, IdentityRole>()
-    .AddEntityFrameworkStores<JobContext>()
-    .AddDefaultTokenProviders();
+// Update the Identity configuration in Program.cs
+builder.Services.AddIdentity<IdentityUser, IdentityRole>(options => 
+{
+    // Password settings
+    options.Password.RequireDigit = true;
+    options.Password.RequireLowercase = true;
+    options.Password.RequireUppercase = true;
+    options.Password.RequireNonAlphanumeric = true;
+    options.Password.RequiredLength = 8;
+    
+    // Lockout settings
+    options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+    options.Lockout.MaxFailedAccessAttempts = 5;
+    
+    // User settings
+    options.User.RequireUniqueEmail = true;
+    options.User.AllowedUserNameCharacters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._@+";
+    
+    // Email confirmation settings
+    options.SignIn.RequireConfirmedEmail = true; // Require email verification
+})
+.AddEntityFrameworkStores<JobContext>()
+.AddDefaultTokenProviders();
+
+// Configure token lifetime
+builder.Services.Configure<DataProtectionTokenProviderOptions>(options =>
+{
+    options.TokenLifespan = TimeSpan.FromHours(2); // Set token expiration to 2 hours
+});
 
 // Register the RolesService and RoleMigrationUtility
 builder.Services.AddScoped<RolesService>();
@@ -53,6 +79,9 @@ builder.Services.AddControllers()
         // Avoid infinite recursion by setting a reasonable max depth
         options.JsonSerializerOptions.MaxDepth = 10;
     });
+
+// Register the EmailService
+builder.Services.AddScoped<EmailService>();
 
 // Add Authentication with JWT Bearer and Google OAuth
 builder.Services.AddAuthentication(options =>
